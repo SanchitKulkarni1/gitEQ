@@ -7,7 +7,7 @@ from app.analysis.ast_dispatcher import extract_symbols
 from app.analysis.dependency_graph import build_dependency_graph
 from app.analysis.graph_metrics import compute_graph_metrics
 from app.analysis.layer_inference import infer_layers
-from app.llm.docs.docs_generator import generate_docs_sectionwise # <--- NEW IMPORT
+from app.llm.docs.docs_generator import generate_docs_sectionwise 
 from app.ingestion.content_loader import load_contents
 from app.ingestion.github_client import GitHubClient
 from app.ingestion.repo_meta import fetch_repo_meta
@@ -18,6 +18,9 @@ from app.models.state import RepoState
 from app.stress.stress_engine import run_stress_test
 from app.stress.stress_scenarios import PRESET_STRESS_SCENARIOS
 
+# Context Imports
+from app.analysis.archetype_detection import detect_architecture
+from app.stress.stress_models import RepoContext, TechStack
 
 client = GitHubClient()
 
@@ -25,11 +28,9 @@ client = GitHubClient()
 def parse_repo(state: RepoState) -> RepoState:
     path = urlparse(state.repo_url).path.strip("/")
     parts = path.split("/")
-    
     if len(parts) >= 2:
         state.owner = parts[0]
         state.repo = parts[1].removesuffix(".git")
-        
     return state
 
 async def resolve_branch(state: RepoState) -> RepoState:
@@ -38,61 +39,42 @@ async def resolve_branch(state: RepoState) -> RepoState:
     state.stats["repo_size_kb"] = meta["size_kb"]
     return state
 
-
 async def load_tree(state: RepoState) -> RepoState:
-    tree = await fetch_repo_tree(
-        client,
-        state.owner,
-        state.repo,
-        state.branch,
-    )
+    tree = await fetch_repo_tree(client, state.owner, state.repo, state.branch)
     state.tree_raw = tree
     state.tree_normalized = normalize_tree(tree)
     state.stats["files_total"] = len(tree)
     return state
 
-
 def apply_glob_filter(state: RepoState) -> RepoState:
     with open("app/configs/globs.yaml") as f:
         cfg = yaml.safe_load(f)
-
     gf = GlobFilter(cfg["include"], cfg["exclude"])
     selected = gf.filter(state.tree_normalized)
-
     state.files_selected = selected
     state.stats["files_selected"] = len(selected)
     state.stats["paths"] = [f["path"] for f in selected]
-
     return state
 
 async def fetch_contents_node(state: RepoState) -> RepoState:
-    contents = await load_contents(
-        client,
-        state.owner,
-        state.repo,
-        state.files_selected,
-    )
+    contents = await load_contents(client, state.owner, state.repo, state.files_selected)
     state.files_content = contents
     state.stats["files_loaded"] = len(contents)
     return state
 
 def universal_ast_node(state: RepoState) -> RepoState:
     all_symbols = []
-
     for path, content in state.files_content.items():
         all_symbols.extend(extract_symbols(path, content))
-
     state.symbols = all_symbols
     state.stats["symbols_extracted"] = len(all_symbols)
     return state
 
 def dependency_graph_node(state: RepoState) -> RepoState:
     graph = build_dependency_graph(state.symbols)
-
     state.dependency_graph = graph
     state.stats["dependency_edges"] = sum(len(v) for v in graph.values())
     state.stats["dependency_nodes"] = len(graph)
-
     return state
 
 def architecture_inference_node(state: RepoState) -> RepoState:
@@ -100,35 +82,49 @@ def architecture_inference_node(state: RepoState) -> RepoState:
     state.layers = infer_layers(state)
     state.architecture_hypotheses = infer_architecture_style(state)
     state.assumptions = infer_assumptions(state)
-
     return state
 
 def stress_test_node(state: RepoState) -> RepoState:
     """
-    Runs PRESET stress scenarios (baseline).
-    The interactive chatbot will run DYNAMIC scenarios later.
+    Runs PRESET stress scenarios.
+    Ensures architecture context exists using state.files_content.
     """
-    results = []
+    print("   Running Stress Tests...")
+    
+    # ---------------------------------------------------------
+    # 1. FIX: Derive file list from content keys
+    # ---------------------------------------------------------
+    file_list = list(state.files_content.keys()) 
 
+    # Ensure repo_context exists
+    if not getattr(state, "repo_context", None):
+        print("   -> Detecting Architecture for Stress Context...")
+        arch_info = detect_architecture(
+            file_list,  # <--- Pass the derived list, NOT state.files
+            state.symbols, 
+            state.files_content
+        )
+        
+        state.repo_context = RepoContext(
+            architecture_type=arch_info['architecture_type'],
+            tech_stack=TechStack(**arch_info['tech_stack']),
+            total_files=len(file_list) # <--- Use derived length
+        )
+
+    results = []
     for stress in PRESET_STRESS_SCENARIOS.values():
-        result = run_stress_test(state, stress)
+        result = run_stress_test(
+            state, 
+            stress, 
+            repo_context=state.repo_context
+        )
         results.append(result.dict())
 
     state.stress_results = results
     return state
 
 def docs_generation_node(state: RepoState) -> RepoState:
-    """
-    Generates documentation sections (Architecture, Stress Analysis) in parallel.
-    This populates 'state.generated_docs', which the Chatbot requires to answer questions.
-    """
-    # Run the parallel docs generator
     docs_output = generate_docs_sectionwise(state)
-    
-    # Store the results in the state
     state.generated_docs = docs_output["docs"]
-    
-    # Log stats
     state.stats["docs_sections"] = len(state.generated_docs)
-    
     return state

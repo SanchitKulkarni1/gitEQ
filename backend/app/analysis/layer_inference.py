@@ -61,7 +61,18 @@ def infer_fullstack_layers(files):
 def infer_layers(state: RepoState):
     # Now you can keep your code exactly the same using the . method
     files = list(state.dependency_graph.keys())
-    archetype = detect_archetype(files, state.symbols)
+    
+    # ---------------------------------------------------------
+    # 🚨 FIX: Pass 3 arguments and extract ["archetype"] string
+    # ---------------------------------------------------------
+    detection_result = detect_archetype(
+        files, 
+        state.symbols, 
+        state.files_content  # <--- NEW ARGUMENT REQUIRED
+    )
+    
+    # The new detector returns a Dict, extract the string for backward compatibility
+    archetype = detection_result["archetype"]
 
     state.archetype = archetype
 

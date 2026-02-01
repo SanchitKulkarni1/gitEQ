@@ -1,8 +1,9 @@
 # app/models/state.py
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
-
+# 1. NEW IMPORT
+from app.stress.stress_models import RepoContext
 
 class RepoState(BaseModel):
     repo_url: str
@@ -24,5 +25,8 @@ class RepoState(BaseModel):
     assumptions: List[Dict] = []
     stress_results: list = []
     generated_docs: Dict[str, str] = {}
+    
+    # 2. NEW FIELD (This was missing!)
+    repo_context: Optional[RepoContext] = None
 
     stats: Dict = {}

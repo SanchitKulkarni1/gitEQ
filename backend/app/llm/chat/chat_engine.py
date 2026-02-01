@@ -14,11 +14,10 @@ from app.llm.gemini_client import client
 from app.stress.stress_engine import run_stress_test
 from app.stress.stress_models import StressVector
 
-# 2. Configuration for Extraction Tools (Use Lite for Speed/Quota)
-TOOL_MODEL = "gemini-flash-latest"
+# 2. Configuration
+# Using specific models helps avoid Rate Limit (429) errors
+TOOL_MODEL = "gemini-2.5-flash-lite" 
 GEN_CONFIG = types.GenerateContentConfig(temperature=0.0)
-
-# 3. Configuration for Final Answer (Use Smartest Available)
 CHAT_MODEL = "gemini-flash-latest"
 
 def infer_stress_config(question: str) -> dict:
@@ -52,7 +51,7 @@ def infer_stress_config(question: str) -> dict:
         return {"layers": [], "type": "traffic", "severity": 0.5}
 
 def answer_question(state, question: str):
-    # 1. OPTIMIZED COMPREHENSION (1 Call instead of 2)
+    # 1. OPTIMIZED COMPREHENSION
     intent, entities = comprehend_query(question)
     
     print(f"DEBUG: Intent='{intent}', Entities={entities}")
@@ -73,8 +72,18 @@ def answer_question(state, question: str):
                 propagation_type=config["type"] 
             )
             
-            result = run_stress_test(state, vector)
-            context = result.dict()
+            # ---------------------------------------------------------
+            # 🚨 FIX: Pass repo_context from state
+            # ---------------------------------------------------------
+            if getattr(state, "repo_context", None):
+                result = run_stress_test(
+                    state, 
+                    vector, 
+                    repo_context=state.repo_context  # <--- ARGUMENT ADDED
+                )
+                context = result.dict()
+            else:
+                context = "Error: Architecture context not found. Please ensure ingestion ran successfully."
         else:
             context = get_stress_context(state)
 

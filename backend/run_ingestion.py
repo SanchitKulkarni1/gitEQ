@@ -3,9 +3,11 @@ import time
 from app.graphs.ingestion_graph import build_ingestion_graph
 from app.models.state import RepoState
 
-# CORRECTED IMPORTS (Based on your actual folder structure)
+# Imports
 from app.llm.docs.docs_generator import generate_docs_sectionwise
 from app.llm.chat.chat_engine import answer_question
+from app.analysis.archetype_detection import detect_architecture
+from app.stress.stress_models import RepoContext, TechStack
 
 async def main():
     # =========================================================================
@@ -24,15 +26,43 @@ async def main():
     print(f"✅ Ingestion Complete. {state.stats.get('files_selected', 0)} files analyzed.")
 
     # =========================================================================
-    # PHASE 2: DOCUMENTATION GENERATION (Parallel)
+    # PHASE 1.5: ARCHITECTURE DETECTION
+    # =========================================================================
+    print("\n🧠 DETECTING ARCHITECTURE...")
+    
+    # ---------------------------------------------------------
+    # 🚨 FIX: Extract file list from dictionary keys
+    # ---------------------------------------------------------
+    file_list = list(state.files_content.keys())
+
+    arch_info = detect_architecture(
+        file_list,           # <--- CHANGED from state.files to file_list
+        state.symbols, 
+        state.files_content
+    )
+    
+    # Create the Context Object
+    repo_context = RepoContext(
+        architecture_type=arch_info['architecture_type'],
+        tech_stack=TechStack(**arch_info['tech_stack']),
+        total_files=len(file_list)
+    )
+    
+    # Save to state
+    state.repo_context = repo_context 
+    
+    print(f"   👉 Type: {repo_context.architecture_type.value}")
+    print(f"   👉 Framework: {repo_context.tech_stack.framework}")
+    print(f"   👉 Language: {repo_context.tech_stack.language}")
+
+    # =========================================================================
+    # PHASE 2: DOCUMENTATION GENERATION
     # =========================================================================
     print("\n📝 STARTING PIPELINE: DOCUMENTATION")
     
-    # This runs the LLM calls in parallel
     docs_output = generate_docs_sectionwise(state)
     state.generated_docs = docs_output["docs"] 
     
-    # --- UPDATED PRINT LOGIC: SHOW CONTENT ---
     print("\n📄 GENERATED DOCUMENTATION CONTENT:\n")
     for section, content in state.generated_docs.items():
         print(f"--- [ SECTION: {section.upper()} ] " + "-"*40)
@@ -45,24 +75,22 @@ async def main():
             print(f"  [{section}]: {warns}")
 
     # =========================================================================
-    # SAFETY PAUSE (Prevent 429 Rate Limit Crash)
+    # SAFETY PAUSE
     # =========================================================================
     print("⏳ Cooling down for 30 seconds to reset Quota...")
     time.sleep(30) 
 
     # =========================================================================
-    # PHASE 3: STRESS TEST (CHATBOT SIMULATION)
+    # PHASE 3: STRESS TEST
     # =========================================================================
     print("\n🤖 STARTING PIPELINE: CHATBOT STRESS TEST")
     
-    # Scenario 1: Traffic Load
     user_question_1 = "What will happen if we get a sudden spike of 5000 concurrent users on the landing page?"
     print(f"\n❓ User Question: '{user_question_1}'")
     
     response_1 = answer_question(state, user_question_1)
     print(f"💡 Chatbot Answer:\n{response_1}")
 
-    # Scenario 2: Dependency Failure
     user_question_2 = "What happens if the API layer crashes completely?"
     print(f"\n❓ User Question: '{user_question_2}'")
     
