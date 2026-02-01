@@ -1,47 +1,100 @@
 # app/chat/intent_classifier.py
-from app.llm.gemini_client import client # Using your updated client
+import json
+from app.llm.gemini_client import client
 from google.genai import types
 
-GEN_CONFIG = types.GenerateContentConfig(temperature=0.0)
+GEN_CONFIG = types.GenerateContentConfig(
+    temperature=0.0,
+    response_mime_type="application/json" # Force JSON output for reliability
+)
 
-def classify_intent(question: str) -> str:
-    prompt = f"""
-    Classify the user question into ONE category:
-    [structure, change_impact, architecture, stress, code_lookup, unknown]
-    
-    Question: {question}
-    
-    Return ONLY the category name (lowercase).
-    """
-    response = client.models.generate_content(
-        model="gemini-1.5-flash", contents=prompt, config=GEN_CONFIG
-    )
-    return response.text.strip().lower()
+# Use your High-Limit Model
+MODEL_NAME = "gemini-2.5-flash-lite"
 
-def extract_entities(question: str) -> dict:
+def comprehend_query(question: str):
     """
-    Extracts relevant file paths, layer names, or component names.
-    Parallelizing this saves time vs. doing it after intent.
+    Performs Intent Classification AND Entity Extraction in a single shot.
+    Returns: (intent_string, entities_dict)
     """
     prompt = f"""
-    Analyze the question and extract targeted entities.
-    Return a JSON with:
-    - 'files': list of file paths mentioned (e.g. 'app/main.py', 'auth.py')
-    - 'layers': list of architectural layers mentioned (e.g. 'ui', 'database')
+    Analyze the user question about a GitHub repository.
     
-    Question: {question}
+    1. CLASSIFY INTENT into ONE category:
+       [structure, change_impact, architecture, stress, code_lookup, unknown]
     
-    Return ONLY valid JSON.
+    2. EXTRACT ENTITIES:
+       - 'files': list of file paths (e.g. 'main.py', 'auth/login.ts')
+       - 'layers': list of architectural layers (e.g. 'ui', 'database', 'api')
+
+    Question: "{question}"
+    
+    Return JSON format:
+    {{
+        "intent": "category_name",
+        "entities": {{
+            "files": [],
+            "layers": []
+        }}
+    }}
     """
-    # In a real app, ensure you request JSON mode if available
-    response = client.models.generate_content(
-        model="gemini-1.5-flash", contents=prompt, config=GEN_CONFIG
-    )
     
-    # Simple clean-up to ensure we get a dict
     try:
-        import json
+        response = client.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt, 
+            config=GEN_CONFIG
+        )
+        
+        # Parse the JSON response
+        data = json.loads(response.text.strip())
+        
+        # safely extract (defaults provided in case LLM hallucinates structure)
+        intent = data.get("intent", "unknown").lower()
+        entities = data.get("entities", {"files": [], "layers": []})
+        
+        return intent, entities
+
+    except Exception as e:
+        print(f"DEBUG: Comprehension failed: {e}")
+        return "unknown", {"files": [], "layers": []}
+
+def comprehend_query(question: str):
+    """
+    Performs Intent Classification AND Entity Extraction.
+    """
+    prompt = f"""
+    You are a developer assistant. Analyze the query and return a JSON object.
+    
+    1. CLASSIFY INTENT (Choose ONE):
+       - "stress": Questions about LOAD (users, traffic, spike) or FAILURE (crash, down, break, what happens if X fails).
+       - "change_impact": Questions about editing code (modifying, changing, updating a file).
+       - "structure": Questions about how code is organized or where things are.
+       - "code_lookup": Questions asking to see specific code or functions.
+       - "architecture": High-level questions about tech stack or design patterns.
+    
+    2. EXTRACT ENTITIES:
+       - 'files': list of file paths (e.g. 'main.py').
+       - 'layers': list of architectural layers (e.g. 'ui', 'api', 'database').
+
+    Query: "{question}"
+    
+    Return ONLY raw JSON.
+    Example: {{"intent": "stress", "entities": {{"files": [], "layers": ["api"]}}}}
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt, 
+            config=GEN_CONFIG
+        )
+        
+        # Clean up formatting
         text = response.text.strip().replace("```json", "").replace("```", "")
-        return json.loads(text)
-    except:
-        return {"files": [], "layers": []}
+        data = json.loads(text)
+        
+        return data.get("intent", "unknown").lower(), data.get("entities", {"files": [], "layers": []})
+
+    except Exception as e:
+        print(f"DEBUG: Comprehension failed: {e}")
+        return "unknown", {"files": [], "layers": []}

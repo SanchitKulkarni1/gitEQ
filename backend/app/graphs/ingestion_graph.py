@@ -11,6 +11,7 @@ from app.graphs.ingestion_nodes import (
     dependency_graph_node,
     architecture_inference_node,
     stress_test_node,
+    docs_generation_node, # <--- 1. Import the new node
 )
 
 
@@ -26,6 +27,7 @@ def build_ingestion_graph():
     g.add_node("dependency_graph_node", dependency_graph_node)
     g.add_node("architecture_inference_node", architecture_inference_node)
     g.add_node("stress_test_node", stress_test_node)
+    g.add_node("docs_generation_node", docs_generation_node)
 
     g.set_entry_point("parse_repo")
     g.add_edge("parse_repo", "resolve_branch")
@@ -36,6 +38,9 @@ def build_ingestion_graph():
     g.add_edge("universal_ast_node", "dependency_graph_node")
     g.add_edge("dependency_graph_node", "architecture_inference_node")
     g.add_edge("architecture_inference_node", "stress_test_node")
+    g.add_edge("stress_test_node", "docs_generation_node")
 
-    g.set_finish_point("stress_test_node")
+
+    g.set_finish_point("docs_generation_node")
+    
     return g.compile()

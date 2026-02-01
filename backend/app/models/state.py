@@ -23,5 +23,6 @@ class RepoState(BaseModel):
     architecture_hypotheses: List[Dict] = []
     assumptions: List[Dict] = []
     stress_results: list = []
+    generated_docs: Dict[str, str] = {}
 
     stats: Dict = {}

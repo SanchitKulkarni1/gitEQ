@@ -1,6 +1,6 @@
 # app/stress/stress_models.py
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Literal, Optional
 
 
 class StressVector(BaseModel):
@@ -8,6 +8,7 @@ class StressVector(BaseModel):
     description: str
     target_layers: List[str]
     severity: float
+    propagation_type: Literal["traffic", "dependency"] = "traffic"
 
 
 class StressResult(BaseModel):

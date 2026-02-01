@@ -7,7 +7,7 @@ from app.analysis.ast_dispatcher import extract_symbols
 from app.analysis.dependency_graph import build_dependency_graph
 from app.analysis.graph_metrics import compute_graph_metrics
 from app.analysis.layer_inference import infer_layers
-from app.ingestion.content_loader import load_contents
+from app.llm.docs.docs_generator import generate_docs_sectionwise # <--- NEW IMPORT
 from app.ingestion.content_loader import load_contents
 from app.ingestion.github_client import GitHubClient
 from app.ingestion.repo_meta import fetch_repo_meta
@@ -103,7 +103,11 @@ def architecture_inference_node(state: RepoState) -> RepoState:
 
     return state
 
-def stress_test_node(state):
+def stress_test_node(state: RepoState) -> RepoState:
+    """
+    Runs PRESET stress scenarios (baseline).
+    The interactive chatbot will run DYNAMIC scenarios later.
+    """
     results = []
 
     for stress in PRESET_STRESS_SCENARIOS.values():
@@ -111,4 +115,20 @@ def stress_test_node(state):
         results.append(result.dict())
 
     state.stress_results = results
+    return state
+
+def docs_generation_node(state: RepoState) -> RepoState:
+    """
+    Generates documentation sections (Architecture, Stress Analysis) in parallel.
+    This populates 'state.generated_docs', which the Chatbot requires to answer questions.
+    """
+    # Run the parallel docs generator
+    docs_output = generate_docs_sectionwise(state)
+    
+    # Store the results in the state
+    state.generated_docs = docs_output["docs"]
+    
+    # Log stats
+    state.stats["docs_sections"] = len(state.generated_docs)
+    
     return state

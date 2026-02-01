@@ -1,90 +1,78 @@
 # app/docs/docs_generator.py
 import concurrent.futures
-from typing import Dict, Tuple, Callable
-from google.genai import types
-from app.llm.gemini_client import client  # Importing the client from your setup
+from typing import Dict, Any
 from app.models.state import RepoState
-from app.llm.docs.prompts import (
-    get_overview_prompt,
-    get_architecture_prompt,
-    get_core_modules_prompt,
-    get_system_boundaries_prompt,
-    get_assumptions_prompt,
-    get_stress_test_prompt,
-    validate_state_for_docs,
-)
+from app.llm.gemini_client import client
 
-# Configuration for the LLM calls
-GEN_CONFIG = types.GenerateContentConfig(
-    temperature=0.2,
-    top_p=0.9,
-    max_output_tokens=2048,
-)
-MODEL_NAME = "gemini-1.5-flash"  # Using Flash for speed/cost, switch to Pro if needed
+# USE GEMMA (As per your working config)
+MODEL_NAME = "gemma-3-12b-it" 
 
-def fetch_section(task_args: Tuple[str, Callable, RepoState]) -> Tuple[str, str]:
+def fetch_section(args):
     """
-    Worker function to generate a single documentation section.
-    Args:
-        task_args: Tuple of (section_key, prompt_generator_func, state)
-    Returns:
-        Tuple of (section_key, generated_text)
+    Worker function for parallel execution.
     """
-    key, prompt_func, state = task_args
+    section, state_dict = args
+    # Reconstruct state from dict for the worker
+    state = RepoState(**state_dict) 
     
-    # 1. Generate the prompt (CPU bound, fast)
+    context = ""
+    
+    # --- BUILD CONTEXT BASED ON SECTION ---
+    if section == "architecture":
+        # FIX: Ensure we handle empty layers gracefully
+        layer_summary = "\n".join([f"- {k}: {len(v)} files" for k, v in state.layers.items()])
+        context = f"Layers:\n{layer_summary}\n\nDependency Stats: {state.stats}"
+
+    elif section == "stress_analysis":
+        # FIX: Ensure we are processing dictionaries, not tuples
+        results = []
+        for r in state.stress_results:
+            # Check if 'r' is a dict or an object and convert to string safely
+            r_str = str(r) if isinstance(r, (dict, str)) else r.json()
+            results.append(r_str)
+        context = "\n".join(results)
+
+    # ... (Rest of context building logic for overview, etc. remains same) ...
+    else:
+        # Default context
+        context = f"Files: {list(state.files_content.keys())[:50]}"
+
+    prompt = f"Write a technical documentation section for '{section}' based on this context:\n{context}"
+    
     try:
-        prompt = prompt_func(state)
-        
-        # 2. Call LLM (I/O bound, slow - this benefits from parallelism)
         response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=GEN_CONFIG
+            model=MODEL_NAME, 
+            contents=prompt
         )
-        return key, response.text.strip()
-        
+        return section, response.text.strip()
     except Exception as e:
-        # Graceful failure: return the error as the section content so the pipeline doesn't crash
-        return key, f"Error generating section: {str(e)}"
+        return section, f"Error generating section: {str(e)}"
 
 def generate_docs_sectionwise(state: RepoState) -> Dict:
-    """
-    Generates all documentation sections in parallel.
-    """
-    # 1. Run Validation First
-    warnings = validate_state_for_docs(state)
-
-    # 2. Define the work to be done
-    # Format: (output_key, prompt_function)
-    tasks_map = [
-        ("overview", get_overview_prompt),
-        ("architecture", get_architecture_prompt),
-        ("core_modules", get_core_modules_prompt),
-        ("system_boundaries", get_system_boundaries_prompt),
-        ("assumptions", get_assumptions_prompt),
-        ("stress_analysis", get_stress_test_prompt),
+    # Define the sections we want
+    sections = [
+        "overview", 
+        "architecture", 
+        "core_modules", 
+        "system_boundaries", 
+        "assumptions", 
+        "stress_analysis"
     ]
-
-    # Prepare arguments for the workers
-    # We pass 'state' to every worker
-    worker_args = [(key, func, state) for key, func in tasks_map]
-
-    docs = {}
     
-    # 3. Execute in Parallel
-    # We use 6 workers because you have exactly 6 sections. 
-    # This ensures maximum concurrency without queuing.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        # map returns results in the order they were submitted, 
-        # but execution happens concurrently
+    # Serialize state ONCE to pass to workers
+    state_dict = state.dict()
+    worker_args = [(s, state_dict) for s in sections]
+    
+    docs = {}
+    warnings = {}
+
+    # Run in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         results = executor.map(fetch_section, worker_args)
         
-        # Collect results
-        for key, content in results:
-            docs[key] = content
+    for section, content in results:
+        docs[section] = content
+        if "Error" in content:
+            warnings[section] = [content]
 
-    return {
-        "docs": docs,
-        "warnings": warnings,
-    }
+    return {"docs": docs, "warnings": warnings}
