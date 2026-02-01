@@ -7,6 +7,16 @@ async def main():
     state = await graph.ainvoke({
         "repo_url": "https://github.com/SanchitKulkarni1/portfoliowebsite.git"
     })
-    print(state['stats'])
+
+    print(state["stats"]) 
+
+    path = "src/main.tsx"
+    # FIXED: Use dictionary access here
+    if path in state["files_content"]:
+        print(state["files_content"][path])
+    else:
+        print(f"{path} was not fetched. Available files:")
+        # FIXED: Use dictionary access here
+        print(list(state["files_content"].keys()))
 
 asyncio.run(main())

@@ -6,6 +6,7 @@ from app.graphs.ingestion_nodes import (
     resolve_branch,
     load_tree,
     apply_glob_filter,
+    fetch_contents_node
 )
 
 
@@ -16,11 +17,13 @@ def build_ingestion_graph():
     g.add_node("resolve_branch", resolve_branch)
     g.add_node("load_tree", load_tree)
     g.add_node("apply_glob_filter", apply_glob_filter)
+    g.add_node("fetch_contents_node", fetch_contents_node)
 
     g.set_entry_point("parse_repo")
     g.add_edge("parse_repo", "resolve_branch")
     g.add_edge("resolve_branch", "load_tree")
     g.add_edge("load_tree", "apply_glob_filter")
+    g.add_edge("apply_glob_filter", "fetch_contents_node")
 
-    g.set_finish_point("apply_glob_filter")
+    g.set_finish_point("fetch_contents_node")
     return g.compile()

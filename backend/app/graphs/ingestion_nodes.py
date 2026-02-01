@@ -1,6 +1,8 @@
 # app/graphs/ingestion_nodes.py
 import yaml
 from urllib.parse import urlparse
+from app.ingestion.content_loader import load_contents
+from app.ingestion.content_loader import load_contents
 from app.ingestion.github_client import GitHubClient
 from app.ingestion.repo_meta import fetch_repo_meta
 from app.ingestion.tree_fetcher import fetch_repo_tree
@@ -53,4 +55,15 @@ def apply_glob_filter(state: RepoState) -> RepoState:
     state.stats["files_selected"] = len(selected)
     state.stats["paths"] = [f["path"] for f in selected]
 
+    return state
+
+async def fetch_contents_node(state: RepoState) -> RepoState:
+    contents = await load_contents(
+        client,
+        state.owner,
+        state.repo,
+        state.files_selected,
+    )
+    state.files_content = contents
+    state.stats["files_loaded"] = len(contents)
     return state

@@ -13,5 +13,6 @@ class RepoState(BaseModel):
     tree_raw: Optional[List[Dict]] = None
     tree_normalized: Optional[List[Dict]] = None
     files_selected: Optional[List[Dict]] = None
+    files_content: Dict[str, str] = {}
 
     stats: Dict = {}
