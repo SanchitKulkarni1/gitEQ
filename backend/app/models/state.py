@@ -22,6 +22,6 @@ class RepoState(BaseModel):
     graph_metrics: Dict = {}
     architecture_hypotheses: List[Dict] = []
     assumptions: List[Dict] = []
-
+    stress_results: list = []
 
     stats: Dict = {}

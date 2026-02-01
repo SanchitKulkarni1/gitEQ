@@ -15,6 +15,8 @@ from app.ingestion.tree_fetcher import fetch_repo_tree
 from app.ingestion.tree_normalizer import normalize_tree
 from app.ingestion.glob_filter import GlobFilter
 from app.models.state import RepoState
+from app.stress.stress_engine import run_stress_test
+from app.stress.stress_scenarios import PRESET_STRESS_SCENARIOS
 
 
 client = GitHubClient()
@@ -99,4 +101,14 @@ def architecture_inference_node(state: RepoState) -> RepoState:
     state.architecture_hypotheses = infer_architecture_style(state)
     state.assumptions = infer_assumptions(state)
 
+    return state
+
+def stress_test_node(state):
+    results = []
+
+    for stress in PRESET_STRESS_SCENARIOS.values():
+        result = run_stress_test(state, stress)
+        results.append(result.dict())
+
+    state.stress_results = results
     return state
