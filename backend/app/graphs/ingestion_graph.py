@@ -1,0 +1,26 @@
+# app/graphs/ingestion_graph.py
+from langgraph.graph import StateGraph
+from app.models.state import RepoState
+from app.graphs.ingestion_nodes import (
+    parse_repo,
+    resolve_branch,
+    load_tree,
+    apply_glob_filter,
+)
+
+
+def build_ingestion_graph():
+    g = StateGraph(RepoState)
+
+    g.add_node("parse_repo", parse_repo)
+    g.add_node("resolve_branch", resolve_branch)
+    g.add_node("load_tree", load_tree)
+    g.add_node("apply_glob_filter", apply_glob_filter)
+
+    g.set_entry_point("parse_repo")
+    g.add_edge("parse_repo", "resolve_branch")
+    g.add_edge("resolve_branch", "load_tree")
+    g.add_edge("load_tree", "apply_glob_filter")
+
+    g.set_finish_point("apply_glob_filter")
+    return g.compile()
