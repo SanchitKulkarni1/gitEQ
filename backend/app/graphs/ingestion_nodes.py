@@ -1,6 +1,8 @@
 # app/graphs/ingestion_nodes.py
 import yaml
 from urllib.parse import urlparse
+from app.analysis.ast_dispatcher import extract_symbols
+from app.analysis.dependency_graph import build_dependency_graph
 from app.ingestion.content_loader import load_contents
 from app.ingestion.content_loader import load_contents
 from app.ingestion.github_client import GitHubClient
@@ -66,4 +68,23 @@ async def fetch_contents_node(state: RepoState) -> RepoState:
     )
     state.files_content = contents
     state.stats["files_loaded"] = len(contents)
+    return state
+
+def universal_ast_node(state: RepoState) -> RepoState:
+    all_symbols = []
+
+    for path, content in state.files_content.items():
+        all_symbols.extend(extract_symbols(path, content))
+
+    state.symbols = all_symbols
+    state.stats["symbols_extracted"] = len(all_symbols)
+    return state
+
+def dependency_graph_node(state: RepoState) -> RepoState:
+    graph = build_dependency_graph(state.symbols)
+
+    state.dependency_graph = graph
+    state.stats["dependency_edges"] = sum(len(v) for v in graph.values())
+    state.stats["dependency_nodes"] = len(graph)
+
     return state

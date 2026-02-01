@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 
 
+
 class RepoState(BaseModel):
     repo_url: str
 
@@ -14,5 +15,8 @@ class RepoState(BaseModel):
     tree_normalized: Optional[List[Dict]] = None
     files_selected: Optional[List[Dict]] = None
     files_content: Dict[str, str] = {}
+    symbols: list = []
+    dependency_graph: dict = {}
+
 
     stats: Dict = {}
