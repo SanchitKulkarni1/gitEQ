@@ -17,6 +17,11 @@ class RepoState(BaseModel):
     files_content: Dict[str, str] = {}
     symbols: list = []
     dependency_graph: dict = {}
+    archetype: Optional[str] = None
+    layers: Dict = {}
+    graph_metrics: Dict = {}
+    architecture_hypotheses: List[Dict] = []
+    assumptions: List[Dict] = []
 
 
     stats: Dict = {}

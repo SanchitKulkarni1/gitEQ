@@ -9,6 +9,7 @@ from app.graphs.ingestion_nodes import (
     fetch_contents_node,
     universal_ast_node,
     dependency_graph_node,
+    architecture_inference_node,
 )
 
 
@@ -22,6 +23,7 @@ def build_ingestion_graph():
     g.add_node("fetch_contents_node", fetch_contents_node)
     g.add_node("universal_ast_node", universal_ast_node)
     g.add_node("dependency_graph_node", dependency_graph_node)
+    g.add_node("architecture_inference_node", architecture_inference_node)
 
     g.set_entry_point("parse_repo")
     g.add_edge("parse_repo", "resolve_branch")
@@ -30,6 +32,7 @@ def build_ingestion_graph():
     g.add_edge("apply_glob_filter", "fetch_contents_node")
     g.add_edge("fetch_contents_node", "universal_ast_node")
     g.add_edge("universal_ast_node", "dependency_graph_node")
+    g.add_edge("dependency_graph_node", "architecture_inference_node")
 
-    g.set_finish_point("dependency_graph_node")
+    g.set_finish_point("architecture_inference_node")
     return g.compile()

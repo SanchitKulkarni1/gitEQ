@@ -1,8 +1,12 @@
 # app/graphs/ingestion_nodes.py
 import yaml
 from urllib.parse import urlparse
+from app.analysis.architecture_hypotheses import infer_architecture_style
+from app.analysis.assumption_inference import infer_assumptions
 from app.analysis.ast_dispatcher import extract_symbols
 from app.analysis.dependency_graph import build_dependency_graph
+from app.analysis.graph_metrics import compute_graph_metrics
+from app.analysis.layer_inference import infer_layers
 from app.ingestion.content_loader import load_contents
 from app.ingestion.content_loader import load_contents
 from app.ingestion.github_client import GitHubClient
@@ -86,5 +90,13 @@ def dependency_graph_node(state: RepoState) -> RepoState:
     state.dependency_graph = graph
     state.stats["dependency_edges"] = sum(len(v) for v in graph.values())
     state.stats["dependency_nodes"] = len(graph)
+
+    return state
+
+def architecture_inference_node(state: RepoState) -> RepoState:
+    state.graph_metrics = compute_graph_metrics(state.dependency_graph)
+    state.layers = infer_layers(state)
+    state.architecture_hypotheses = infer_architecture_style(state)
+    state.assumptions = infer_assumptions(state)
 
     return state
