@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageCircle, Send, X, Minimize2, Loader2 } from 'lucide-react';
+import { MessageCircle, Send, X, Loader2, Bot, User } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { sendChatMessage } from '../utils/api';
+import MarkdownRenderer from './MarkdownRenderer';
 
 interface ChatBotProps {
   analysisId: string | null;
@@ -95,7 +96,7 @@ export default function ChatBot({ analysisId, apiKey, repoName }: ChatBotProps) 
   }
 
   return (
-    <div className="fixed inset-4 md:bottom-6 md:right-6 md:left-auto md:top-auto md:w-96 md:h-[600px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col z-40">
+    <div className="fixed inset-4 md:bottom-6 md:right-6 md:left-auto md:top-auto md:w-[600px] md:h-[80vh] md:max-h-[800px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col z-40">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 bg-slate-800 rounded-t-xl">
         <div className="flex items-center gap-2">
           <MessageCircle className="w-5 h-5 text-purple-400" />
@@ -133,17 +134,36 @@ export default function ChatBot({ analysisId, apiKey, repoName }: ChatBotProps) 
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
               >
+                {/* Avatar */}
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${message.role === 'user'
+                    ? 'bg-purple-600'
+                    : 'bg-gradient-to-br from-purple-500 to-pink-500'
+                  }`}>
+                  {message.role === 'user' ? (
+                    <User className="w-4 h-4 text-white" />
+                  ) : (
+                    <Bot className="w-4 h-4 text-white" />
+                  )}
+                </div>
+
+                {/* Message bubble */}
                 <div
-                  className={`max-w-[85%] px-4 py-2 rounded-lg ${
-                    message.role === 'user'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-slate-800 text-slate-200'
-                  }`}
+                  className={`max-w-[80%] rounded-2xl ${message.role === 'user'
+                      ? 'bg-purple-600 text-white px-4 py-3'
+                      : 'bg-slate-800/80 border border-slate-700 px-4 py-3'
+                    }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  <span className="text-xs opacity-60 mt-1 block">
+                  {message.role === 'user' ? (
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  ) : (
+                    <div className="chat-markdown text-sm">
+                      <MarkdownRenderer content={message.content} />
+                    </div>
+                  )}
+                  <span className={`text-xs mt-2 block ${message.role === 'user' ? 'text-purple-200' : 'text-slate-500'
+                    }`}>
                     {message.timestamp.toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
