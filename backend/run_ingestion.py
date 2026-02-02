@@ -74,11 +74,6 @@ async def main():
         for section, warns in docs_output["warnings"].items():
             print(f"  [{section}]: {warns}")
 
-    # =========================================================================
-    # SAFETY PAUSE
-    # =========================================================================
-    print("⏳ Cooling down for 30 seconds to reset Quota...")
-    time.sleep(30) 
 
     # =========================================================================
     # PHASE 3: STRESS TEST
@@ -91,7 +86,7 @@ async def main():
     response_1 = answer_question(state, user_question_1)
     print(f"💡 Chatbot Answer:\n{response_1}")
 
-    user_question_2 = "What happens if the API layer crashes completely?"
+    user_question_2 = "Can you analyze the change impact if we modify the routing logic?"
     print(f"\n❓ User Question: '{user_question_2}'")
     
     response_2 = answer_question(state, user_question_2)

@@ -1,476 +1,850 @@
-# app/prompts/prompts.py
+# app/llm/docs/prompts.py
 """
-Improved prompt templates for GitEQ documentation generation.
-Uses functions instead of module-level f-strings to avoid timing issues.
+Enhanced prompts that leverage ALL the analysis data including rich evidence.
+These prompts are designed to produce AUTHORITATIVE, DATA-DRIVEN documentation.
 """
 
-from typing import List, Dict
 from app.models.state import RepoState
+from typing import Dict, List
+from app.analysis.graph_metrics import compute_graph_metrics
+import json
+
+
+def get_top_hub(metrics: Dict):
+    """
+    Safely extract the most critical dependency hub.
+    Returns (module_name, fan_in_count) or (None, 0).
+    """
+    if not metrics:
+        return None, 0
+
+    module = metrics.get("max_fan_in_module")
+    if not module:
+        return None, 0
+
+    hub_details = metrics.get("hub_details", {})
+    fan_in = hub_details.get(module, {}).get("fan_in", 0)
+
+    return module, fan_in
+
+# ============================================================================
+# ENHANCED FORMATTING HELPERS - Make rich evidence readable for the LLM
+# ============================================================================
+
+def format_graph_metrics(metrics: Dict) -> str:
+    """Format dependency graph metrics in a readable way."""
+    if not metrics:
+        return "No dependency metrics available."
+    
+    hubs = metrics.get('hubs', [])[:10]
+    leaves = metrics.get('leaves', [])[:5]
+    
+    return f"""DEPENDENCY ANALYSIS:
+• Total Modules: {metrics.get('total_nodes', 0)}
+• Total Dependencies: {metrics.get('total_edges', 0)}
+• Average Fan-in: {metrics.get('avg_fan_in', 0):.2f} (how many import each module)
+• Average Fan-out: {metrics.get('avg_fan_out', 0):.2f} (how many each module imports)
+• Max Fan-in: {metrics.get('max_fan_in', 0)} ({metrics.get('max_fan_in_module', 'unknown')})
+
+TOP DEPENDENCY HUBS (Most Imported):
+{chr(10).join([f"  {i+1}. {hub}" for i, hub in enumerate(hubs)])}
+
+LEAF MODULES (Nothing Depends On):
+{chr(10).join([f"  • {leaf}" for leaf in leaves])}
+"""
+
+
+def format_layers(layers: Dict) -> str:
+    """Format layer information clearly."""
+    if not layers:
+        return "No architectural layers detected."
+    
+    result = []
+    for layer_name, files in sorted(layers.items(), key=lambda x: len(x[1]), reverse=True):
+        file_count = len(files)
+        sample_files = files[:5]
+        result.append(f"{layer_name.upper()} ({file_count} files):")
+        result.append("  " + "\n  ".join([f"• {f}" for f in sample_files]))
+        if file_count > 5:
+            result.append(f"  ... and {file_count - 5} more")
+    
+    return "\n".join(result)
+
+
+def format_hypotheses(hypotheses: List[Dict]) -> str:
+    """
+    Format architecture hypotheses with confidence scores and detailed evidence.
+    Enhanced to handle the new rich hypothesis format with pattern_type and characteristics.
+    """
+    if not hypotheses:
+        return "No architectural patterns detected."
+    
+    lines = []
+    
+    # Group by pattern type for better organization
+    by_type = {}
+    for h in hypotheses:
+        pattern_type = h.get('pattern_type', 'General')
+        if pattern_type not in by_type:
+            by_type[pattern_type] = []
+        by_type[pattern_type].append(h)
+    
+    for pattern_type, patterns in sorted(by_type.items()):
+        lines.append(f"\n{pattern_type.upper()}:")
+        for h in patterns:
+            claim = h.get('claim', 'Unknown pattern')
+            confidence = h.get('confidence', 0) * 100
+            evidence = h.get('evidence', {})
+            characteristics = h.get('characteristics', [])
+            warning = h.get('warning', None)
+            
+            lines.append(f"\n• {claim} (Confidence: {confidence:.0f}%)")
+            
+            # Format evidence
+            if evidence:
+                lines.append("  Evidence:")
+                for key, value in evidence.items():
+                    if isinstance(value, list):
+                        if value:
+                            lines.append(f"    - {key}: {', '.join(str(v) for v in value[:3])}")
+                            if len(value) > 3:
+                                lines.append(f"      ... and {len(value) - 3} more")
+                    else:
+                        lines.append(f"    - {key}: {value}")
+            
+            # Format characteristics
+            if characteristics:
+                lines.append("  Characteristics:")
+                for char in characteristics:
+                    lines.append(f"    → {char}")
+            
+            # Add warning if present (for anti-patterns)
+            if warning:
+                lines.append(f"  {warning}")
+    
+    return "\n".join(lines)
+
+
+def format_assumptions(assumptions: List[Dict]) -> str:
+    """
+    Format assumptions with full evidence detail, grouped by risk level.
+    Enhanced to handle the new detailed assumption format with evidence dicts.
+    """
+    if not assumptions:
+        return "No architectural assumptions detected."
+    
+    # Group by risk level
+    critical = [a for a in assumptions if a.get('risk_level', '').upper() == 'CRITICAL']
+    high = [a for a in assumptions if a.get('risk_level', '').upper() == 'HIGH']
+    medium = [a for a in assumptions if a.get('risk_level', '').upper() == 'MEDIUM']
+    low = [a for a in assumptions if a.get('risk_level', '').upper() == 'LOW']
+    
+    def format_group(items):
+        if not items:
+            return "  None detected"
+        
+        result = []
+        for a in items:
+            assumption = a.get('assumption', 'Unknown')
+            impact = a.get('impact', 'Unknown impact')
+            confidence = a.get('confidence', 0) * 100
+            evidence = a.get('evidence', {})
+            mitigation = a.get('mitigation', [])
+            
+            result.append(f"\n  • {assumption}")
+            result.append(f"    Confidence: {confidence:.0f}%")
+            result.append(f"    Impact: {impact}")
+            
+            # Format evidence details
+            if evidence:
+                result.append("    Evidence:")
+                for key, value in evidence.items():
+                    if isinstance(value, list):
+                        if value and len(value) > 0:
+                            result.append(f"      - {key}: {', '.join(str(v) for v in value[:3])}")
+                    elif isinstance(value, dict):
+                        result.append(f"      - {key}:")
+                        for k, v in value.items():
+                            result.append(f"          {k}: {v}")
+                    else:
+                        result.append(f"      - {key}: {value}")
+            
+            # Format mitigation strategies
+            if mitigation:
+                result.append("    Mitigation:")
+                for m in mitigation[:3]:  # Show top 3
+                    result.append(f"      → {m}")
+                if len(mitigation) > 3:
+                    result.append(f"      ... and {len(mitigation) - 3} more strategies")
+        
+        return "\n".join(result)
+    
+    sections = []
+    
+    if critical:
+        sections.append(f"CRITICAL RISK ({len(critical)} assumptions):")
+        sections.append(format_group(critical))
+    
+    if high:
+        sections.append(f"\nHIGH RISK ({len(high)} assumptions):")
+        sections.append(format_group(high))
+    
+    if medium:
+        sections.append(f"\nMEDIUM RISK ({len(medium)} assumptions):")
+        sections.append(format_group(medium))
+    
+    if low:
+        sections.append(f"\nLOW RISK ({len(low)} assumptions):")
+        sections.append(format_group(low))
+    
+    return "\n".join(sections)
+
+
+def format_stress_results(stress_results: List[Dict]) -> str:
+    """Format stress test results with detail."""
+    if not stress_results:
+        return "No stress test results available."
+    
+    sections = []
+    for result in stress_results:
+        name = result.get('stress', 'Unknown Test')
+        applicable = result.get('is_applicable', False)
+        
+        if not applicable:
+            continue  # Skip non-applicable tests
+        
+        # Extract key data
+        failure = result.get('failure_mode', 'Unknown failure')
+        affected = result.get('affected_files', [])
+        bottlenecks = result.get('bottlenecks', [])
+        confidence = result.get('confidence', 0) * 100
+        
+        section = f"""
+TEST: {name}
+Confidence: {confidence:.0f}%
+Failure Mode: {failure}
+Affected Files: {len(affected)} components
+"""
+        
+        # Add bottlenecks if present
+        if bottlenecks:
+            section += "\nBOTTLENECKS IDENTIFIED:\n"
+            for b in bottlenecks[:3]:  # Top 3
+                section += f"  • {b.get('component', 'Unknown')}: {b.get('reason', 'Unknown')}\n"
+                section += f"    Severity: {b.get('severity', 'unknown').upper()}\n"
+                section += f"    Fix: {b.get('recommendation', 'No recommendation')}\n"
+        
+        sections.append(section)
+    
+    return "\n---\n".join(sections)
+
+
+def format_detection_summary(state: RepoState) -> str:
+    """
+    Create a comprehensive summary of all detected patterns and evidence.
+    This gives the LLM a bird's eye view of the codebase intelligence.
+    """
+    summary = []
+    
+    # Count detections
+    hypothesis_count = len(state.architecture_hypotheses) if state.architecture_hypotheses else 0
+    assumption_count = len(state.assumptions) if state.assumptions else 0
+    layer_count = len(state.layers) if state.layers else 0
+    
+    summary.append("DETECTION SUMMARY:")
+    summary.append(f"• Architecture Patterns Detected: {hypothesis_count}")
+    summary.append(f"• Assumptions Identified: {assumption_count}")
+    summary.append(f"• Architectural Layers: {layer_count}")
+    
+    # Technology stack detected
+    if state.assumptions:
+        tech_stack = []
+        for a in state.assumptions:
+            assumption_text = a.get('assumption', '')
+            if 'database' in assumption_text.lower():
+                evidence = a.get('evidence', {})
+                if evidence.get('database_type'):
+                    tech_stack.append(f"Database: {evidence['database_type']}")
+                if evidence.get('orm_type'):
+                    tech_stack.append(f"ORM: {evidence['orm_type']}")
+            elif 'state management' in assumption_text.lower():
+                evidence = a.get('evidence', {})
+                if evidence.get('state_manager'):
+                    tech_stack.append(f"State: {evidence['state_manager']}")
+            elif 'authentication' in assumption_text.lower():
+                evidence = a.get('evidence', {})
+                if evidence.get('auth_type'):
+                    tech_stack.append(f"Auth: {evidence['auth_type']}")
+            elif 'testing' in assumption_text.lower():
+                evidence = a.get('evidence', {})
+                if evidence.get('test_framework'):
+                    tech_stack.append(f"Testing: {evidence['test_framework']}")
+            elif 'deployment' in assumption_text.lower():
+                evidence = a.get('evidence', {})
+                if evidence.get('platform'):
+                    tech_stack.append(f"Deploy: {evidence['platform']}")
+        
+        if tech_stack:
+            summary.append("\nDETECTED TECHNOLOGY STACK:")
+            for tech in tech_stack:
+                summary.append(f"  • {tech}")
+    
+    # Risk summary
+    if state.assumptions:
+        risk_counts = {
+            'CRITICAL': len([a for a in state.assumptions if a.get('risk_level', '').upper() == 'CRITICAL']),
+            'HIGH': len([a for a in state.assumptions if a.get('risk_level', '').upper() == 'HIGH']),
+            'MEDIUM': len([a for a in state.assumptions if a.get('risk_level', '').upper() == 'MEDIUM']),
+            'LOW': len([a for a in state.assumptions if a.get('risk_level', '').upper() == 'LOW']),
+        }
+        
+        summary.append("\nRISK PROFILE:")
+        for level, count in risk_counts.items():
+            if count > 0:
+                summary.append(f"  • {level}: {count} assumptions")
+    
+    return "\n".join(summary)
 
 
 # ============================================================================
 # BASE RULES
 # ============================================================================
 
-BASE_RULES = """You are writing technical documentation for a GitHub repository.
+BASE_RULES = """You are a technical documentation writer analyzing a SPECIFIC GitHub repository.
 
-Rules:
-- Use ONLY the facts provided
-- Do NOT invent components, APIs, or behavior
-- If information is missing, say so explicitly
-- Avoid best-practice preaching
-- Use precise engineering language"""
+CRITICAL RULES:
+1. Use ONLY the analysis data provided - this is REAL data from the actual codebase
+2. Do NOT make generic statements - be SPECIFIC to this repository
+3. Do NOT guess or assume - if data is missing, state that explicitly
+4. Do NOT write tutorial-style content - write ANALYSIS of THIS codebase
+5. Use concrete numbers, file names, and metrics from the provided data
+6. Write in present tense about what EXISTS, not what "could" or "might" exist
+7. When evidence includes specific file paths, technology names, or numbers - USE THEM
 
-
-# ============================================================================
-# FORMATTING HELPERS
-# ============================================================================
-
-def format_hypotheses(hypotheses: List[Dict]) -> str:
-    """Format architecture hypotheses for LLM consumption."""
-    if not hypotheses:
-        return "No architectural hypotheses generated."
-    
-    lines = []
-    for h in hypotheses:
-        pattern = h.get('pattern', 'Unknown')
-        confidence = h.get('confidence', 0)
-        evidence = h.get('evidence', 'none')
-        lines.append(f"- **{pattern}** (confidence: {confidence:.0%})")
-        lines.append(f"  Evidence: {evidence}")
-    
-    return "\n".join(lines)
-
-
-def format_layers(layers: Dict) -> str:
-    """Format layer information for LLM consumption."""
-    if not layers:
-        return "No layers detected."
-    
-    result = []
-    for layer_name, files in layers.items():
-        file_count = len(files)
-        sample_files = files[:5]
-        
-        files_text = "\n    ".join([f"- {f}" for f in sample_files])
-        more_text = f"\n    ... and {file_count - 5} more" if file_count > 5 else ""
-        
-        result.append(f"  {layer_name} ({file_count} files):\n    {files_text}{more_text}")
-    
-    return "\n".join(result)
-
-
-def format_metrics(metrics: Dict) -> str:
-    """Format graph metrics for LLM consumption."""
-    avg_fan_in = metrics.get('avg_fan_in', 0)
-    avg_fan_out = metrics.get('avg_fan_out', 0)
-    
-    return f"""  - Total modules: {metrics.get('total_nodes', 0)}
-  - Total dependencies: {metrics.get('total_edges', 0)}
-  - Average fan-in: {avg_fan_in:.2f}
-  - Average fan-out: {avg_fan_out:.2f}
-  - Max fan-in: {metrics.get('max_fan_in', 0)} ({metrics.get('max_fan_in_module', 'unknown')})
-  - Top dependency hubs: {', '.join(metrics.get('hubs', [])[:5])}
-  - Leaf modules (no dependents): {len(metrics.get('leaves', []))}"""
-
-
-def format_assumptions(assumptions: List[Dict]) -> str:
-    """Format assumptions grouped by risk level."""
-    if not assumptions:
-        return "No assumptions detected."
-    
-    high_risk = [a for a in assumptions if a.get('risk_level') == 'high']
-    medium_risk = [a for a in assumptions if a.get('risk_level') == 'medium']
-    low_risk = [a for a in assumptions if a.get('risk_level') == 'low']
-    
-    def format_group(items):
-        if not items:
-            return "  None"
-        return "\n".join([
-            f"  - {a['assumption']}\n"
-            f"    Impact: {a.get('impact', 'unknown')}\n"
-            f"    Evidence: {a.get('evidence', 'none')}"
-            for a in items
-        ])
-    
-    return f"""
-HIGH RISK:
-{format_group(high_risk)}
-
-MEDIUM RISK:
-{format_group(medium_risk)}
-
-LOW RISK:
-{format_group(low_risk)}"""
-
-
-def format_stress_results(stress_results: List[Dict]) -> str:
-    """Format stress test results for detailed analysis."""
-    if not stress_results:
-        return "No stress test results available."
-    
-    sections = []
-    for result in stress_results:
-        scenario = result.get('scenario_name', 'unknown')
-        breaking_point = result.get('breaking_point', 'unknown')
-        symptoms = result.get('symptoms', [])
-        bottlenecks = result.get('bottlenecks', [])
-        
-        symptoms_text = "\n    ".join([f"- {s}" for s in symptoms]) if symptoms else "None detected"
-        bottlenecks_text = "\n    ".join([f"- {b}" for b in bottlenecks]) if bottlenecks else "None detected"
-        
-        sections.append(f"""
-  Scenario: {scenario}
-  Breaking Point: {breaking_point}
-  
-  Symptoms:
-    {symptoms_text}
-  
-  Architectural Bottlenecks:
-    {bottlenecks_text}
-  
-  ---""")
-    
-    return "\n".join(sections)
+BAD Example: "This project is a modern web application that likely uses React..."
+GOOD Example: "This repository contains 65 TypeScript files implementing a React component library with Redux state management (12 store files detected) and Jest testing framework (test_ratio: 32.5%)."
+"""
 
 
 # ============================================================================
-# PROMPT GENERATORS
+# ENHANCED PROMPT GENERATORS
 # ============================================================================
 
 def get_overview_prompt(state: RepoState) -> str:
-    """Generate overview documentation prompt."""
+    """Generate overview documentation prompt with rich context."""
+    
+    hypotheses_text = format_hypotheses(state.architecture_hypotheses)
+    detection_summary = format_detection_summary(state)
+    
+    return f"""{BASE_RULES}
+
+REPOSITORY FACTS (from analysis):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+URL: {state.repo_url}
+Owner/Repo: {state.owner}/{state.repo}
+Branch: {state.branch}
+Total Files in Repo: {state.stats.get('files_total', 'unknown')}
+Files Analyzed: {state.stats.get('files_selected', 'unknown')}
+Code Symbols Extracted: {state.stats.get('symbols_extracted', 'unknown')}
+
+ARCHITECTURE CLASSIFICATION:
+Archetype: {state.archetype.upper() if state.archetype else 'UNKNOWN'}
+
+{detection_summary}
+
+DETECTED PATTERNS (detailed):
+{hypotheses_text}
+
+TECHNOLOGY INDICATORS:
+{chr(10).join([f"• Layer: {name} ({len(files)} files)" for name, files in list(state.layers.items())[:5]])}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK:
+Write a 2-3 paragraph "Overview" section that explains:
+
+1. **What This Repository Is**: State clearly if it's a library, application, API, etc.
+   - Use the archetype and patterns above
+   - Be SPECIFIC: "This is a React component library" not "This is a web project"
+   - Reference specific technologies from the DETECTION SUMMARY
+
+2. **Core Purpose**: What problem does this solve?
+   - Infer from the patterns and layer structure
+   - Example: "Provides 40+ reusable UI components with Redux state management" not "Helps build UIs"
+
+3. **Scope & Scale**: How big and complex is it?
+   - Use the file counts and symbol counts
+   - Mention key statistics
+   - Reference detected tech stack
+
+OUTPUT REQUIREMENTS:
+• Start with "## Overview"
+• 2-3 paragraphs, approximately 150-250 words
+• Use SPECIFIC numbers from the data above
+• Mention specific technologies detected (e.g., "Redux", "PostgreSQL", "Jest")
+• Do NOT use phrases like "likely", "probably", "appears to be"
+• Do NOT include placeholder sections like "Getting Started" or "Installation"
+• Focus on WHAT IT IS, not how to use it
+
+EXAMPLE GOOD START:
+"This repository is a TypeScript-based React component library containing 65 analyzed files and 362 exported symbols. The system implements a component library architecture pattern (95% confidence) with Redux state management (12 store files) and comprehensive Jest testing (test coverage: 32.5%). The codebase uses PostgreSQL with Prisma ORM and deploys via Docker..."
+
+NOW WRITE THE OVERVIEW:"""
+
+
+def get_architecture_prompt(state: RepoState) -> str:
+    """Generate architecture documentation prompt with enhanced evidence."""
+    
+    layers_text = format_layers(state.layers)
+    metrics_text = format_graph_metrics(state.graph_metrics)
     hypotheses_text = format_hypotheses(state.architecture_hypotheses)
     
     return f"""{BASE_RULES}
 
-REPOSITORY CONTEXT:
-- URL: {state.repo_url}
-- Owner: {state.owner}
-- Repository: {state.repo}
-- Default Branch: {state.branch}
-- Repository Size: {state.stats.get('repo_size_kb', 'unknown')} KB
-- Total Files: {state.stats.get('files_total', 'unknown')}
-- Files Analyzed: {state.stats.get('files_selected', 'unknown')}
-- Symbols Extracted: {state.stats.get('symbols_extracted', 'unknown')}
-
-ARCHITECTURAL CLASSIFICATION:
-- Archetype: {state.archetype}
-
-Architecture Hypotheses:
-{hypotheses_text}
-
-TASK:
-Write a 2-3 paragraph overview explaining:
-1. What problem this repository solves
-2. What type of system it is (based on the archetype and hypotheses above)
-3. Its intended scope and primary use case
-
-Focus on INTENT and PURPOSE, not implementation details.
-
-OUTPUT FORMAT:
-- Start with ## Overview heading
-- Use Markdown formatting
-- Keep it concise (2-3 paragraphs, ~150-300 words)
-- Do not invent features or capabilities not evidenced above"""
-
-
-def get_architecture_prompt(state: RepoState) -> str:
-    """Generate architecture documentation prompt."""
-    layers_text = format_layers(state.layers)
-    metrics_text = format_metrics(state.graph_metrics)
-    
-    return f"""{BASE_RULES}
-
-ARCHITECTURAL LAYERS:
-{layers_text}
-
-DEPENDENCY METRICS:
+ARCHITECTURAL DATA (from dependency analysis):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {metrics_text}
 
-DEPENDENCY GRAPH INTERPRETATION GUIDE:
-- **Hubs**: Most imported modules (high fan-in) - these are core dependencies
-- **Fan-in**: Number of modules that import a given module
-- **Fan-out**: Number of modules a given module imports
-- **Leaves**: Modules nothing depends on - likely UI components or entry points
+LAYER STRUCTURE:
+{layers_text}
+
+DETECTED ARCHITECTURAL PATTERNS:
+{hypotheses_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+METRIC INTERPRETATION GUIDE:
+• Fan-in: How many modules IMPORT a given module (high = widely used)
+• Fan-out: How many modules a given module IMPORTS (high = highly coupled)
+• Hubs: Modules with high fan-in - these are CRITICAL dependencies
+• Leaves: Modules with zero fan-in - safe to modify, nothing depends on them
 
 TASK:
-Write a comprehensive architecture section that:
-1. Describes the layer structure and what each layer's responsibility is
-2. Explains how layers interact (dependency direction, coupling)
-3. Identifies architectural patterns visible in the structure (e.g., layered, hexagonal, flat)
-4. Highlights any architectural concerns (e.g., high coupling, circular dependencies, god modules)
+Write a comprehensive "Architecture" section that:
 
-OUTPUT FORMAT:
-- Start with ## Architecture heading
-- Use ### subheadings for each major layer
-- Include a brief paragraph on layer interactions
-- End with a "Architectural Patterns" subsection
-- Use Markdown formatting"""
+1. **Describes the Layer Structure**:
+   - List each layer and its responsibility
+   - Mention file counts (use the numbers above)
+   - Explain the hierarchy (which layer depends on which)
 
+2. **Analyzes Dependency Patterns**:
+   - Identify which modules are dependency hubs
+   - Explain why they're critical (use fan-in/fan-out numbers)
+   - Note any concerning patterns (god modules with >20 dependents)
 
-def get_core_modules_prompt(state: RepoState) -> str:
-    """Generate core modules documentation prompt."""
-    metrics = state.graph_metrics
-    hubs = metrics.get('hubs', [])[:10]
-    
-    # Try to get detailed hub information if available
-    hub_details = metrics.get('hub_details', {})
-    
-    hubs_text = ""
-    for hub in hubs:
-        if hub in hub_details:
-            fan_in = hub_details[hub].get('fan_in', '?')
-            fan_out = hub_details[hub].get('fan_out', '?')
-            hubs_text += f"\n  - {hub} (imported by {fan_in} modules, imports {fan_out} modules)"
-        else:
-            hubs_text += f"\n  - {hub}"
-    
-    return f"""{BASE_RULES}
+3. **Identifies Architectural Patterns**:
+   - Reference the DETECTED PATTERNS above
+   - Mention specific pattern types and their confidence scores
+   - Use the characteristics listed for each pattern
+   - Note any anti-patterns with their warnings
 
-TOP DEPENDENCY HUBS (Most Imported Modules):
-{hubs_text}
+4. **Highlights Risks**:
+   - Point out tightly coupled modules
+   - Identify single points of failure
+   - Note modules with high blast radius
+   - Reference any anti-patterns detected (Hub-and-spoke, God modules, Circular dependencies)
 
-CONTEXT:
-- Total modules analyzed: {metrics.get('total_nodes', 'unknown')}
-- Average fan-in: {metrics.get('avg_fan_in', 0):.2f}
-- Average fan-out: {metrics.get('avg_fan_out', 0):.2f}
+OUTPUT REQUIREMENTS:
+• Start with "## Architecture"
+• Use ### subheadings for each layer
+• Include specific file names from the hubs list
+• Reference actual numbers (fan-in, fan-out counts)
+• Mention specific patterns by name (e.g., "MVC Pattern", "Repository Pattern")
+• Identify at least 2-3 architectural risks based on the metrics
+• Reference pattern confidence scores when discussing architecture decisions
 
-TASK:
-Write a "Core Modules" section that:
-1. Lists the 5-7 most critical modules (from the hubs above)
-2. Explains WHY each is central (based on import counts and position)
-3. Describes the "blast radius" - how many files would be affected if this module's interface changed
-4. Identifies potential risks (e.g., single points of failure, god modules, tight coupling)
+EXAMPLE GOOD PARAGRAPH:
+"The codebase exhibits a layered architecture (Confidence: 80%) with 3 distinct tiers. The system implements the Repository Pattern (Confidence: 75%) for data access abstraction. The ui layer (40 files) contains presentational components following the Atomic Design methodology (Confidence: 80%) with 15 atoms, 12 molecules, and 8 organisms detected. However, src/lib/utils.ts emerges as a critical hub with 23 dependents (fan-in: 23), creating a single point of failure and exhibiting the Hub-and-Spoke anti-pattern. Any breaking change to this module would impact 35% of the codebase..."
 
-For each core module, include:
-- Module name and location
-- Number of dependents (direct change impact)
-- Inferred primary responsibility (based on name, layer, and dependencies)
-- Risk assessment (high/medium/low based on coupling)
-
-OUTPUT FORMAT:
-- Start with ## Core Modules heading
-- Use a list or table format for clarity
-- Include a summary paragraph about overall modularity
-- Use Markdown formatting"""
-
-
-def get_system_boundaries_prompt(state: RepoState) -> str:
-    """Generate system boundaries documentation prompt."""
-    assumptions_text = format_assumptions(state.assumptions)
-    
-    # Detect layer presence
-    layer_names = [str(l).lower() for l in state.layers.keys()]
-    frontend_layers = [l for l in layer_names if any(x in l for x in ['ui', 'component', 'view', 'page'])]
-    backend_layers = [l for l in layer_names if any(x in l for x in ['api', 'service', 'db', 'data', 'model'])]
-    
-    boundary_hint = ""
-    if state.archetype == "fullstack":
-        boundary_hint = "This appears to be a fullstack repository containing both frontend and backend code."
-    elif state.archetype == "frontend":
-        boundary_hint = "This appears to be a frontend-only repository."
-    elif state.archetype == "backend":
-        boundary_hint = "This appears to be a backend-only repository."
-    else:
-        boundary_hint = "The system archetype could not be conclusively determined."
-    
-    return f"""{BASE_RULES}
-
-SYSTEM CLASSIFICATION:
-- Archetype: {state.archetype}
-- {boundary_hint}
-
-DETECTED LAYERS:
-- Frontend layers: {', '.join(frontend_layers) or 'None detected'}
-- Backend layers: {', '.join(backend_layers) or 'None detected'}
-
-ARCHITECTURAL ASSUMPTIONS:
-{assumptions_text}
-
-TASK:
-Write a "System Boundaries" section that:
-1. Clearly states what IS included in this repository vs what ISN'T
-2. If backend is missing: explain where backend logic likely resides (API, microservices, etc.)
-3. If frontend is missing: explain how this system is consumed (REST API, library, CLI tool, etc.)
-4. Describes integration points (external APIs, databases, message queues, external services)
-5. Identifies responsibilities that are ASSUMED to be handled elsewhere
-
-Base your analysis EXCLUSIVELY on the assumptions and layer information provided above.
-Do not speculate about technologies or services not evidenced in the data.
-
-OUTPUT FORMAT:
-- Start with ## System Boundaries heading
-- Use subheadings: ### What's Included, ### What's External, ### Integration Points
-- Be explicit about unknowns
-- Use Markdown formatting"""
-
-
-def get_assumptions_prompt(state: RepoState) -> str:
-    """Generate architectural assumptions documentation prompt."""
-    assumptions_text = format_assumptions(state.assumptions)
-    
-    return f"""{BASE_RULES}
-
-ARCHITECTURAL ASSUMPTIONS (grouped by risk level):
-{assumptions_text}
-
-TASK:
-Write an "Architectural Assumptions" section that:
-1. Lists the key assumptions the codebase makes about its environment, infrastructure, or usage
-2. Explains WHY each assumption likely exists (infer from architectural context and evidence)
-3. Describes WHEN these assumptions become risky or invalid (scaling thresholds, usage patterns, environment changes)
-4. Prioritizes by risk level (address high-risk assumptions first with more detail)
-
-For each assumption, structure your explanation as:
-- **The Assumption**: State it clearly
-- **Why It Exists**: Technical or business rationale (inferred from evidence)
-- **When It Breaks**: Specific conditions that invalidate it (user count, data volume, concurrent load, etc.)
-- **Potential Impact**: What fails when this assumption is violated
-
-OUTPUT FORMAT:
-- Start with ## Architectural Assumptions heading
-- Group by risk level (### High Risk, ### Medium Risk, ### Low Risk)
-- Use a consistent structure for each assumption
-- Include a summary paragraph about overall architectural risk posture
-- Use Markdown formatting"""
+NOW WRITE THE ARCHITECTURE ANALYSIS:"""
 
 
 def get_stress_test_prompt(state: RepoState) -> str:
     """
-    Generate stress test analysis documentation prompt.
-    
-    THIS IS THE DIFFERENTIATING FEATURE - make it count!
+    Generate stress test analysis prompt - YOUR DIFFERENTIATOR!
+    Enhanced with full assumption evidence.
     """
+    
     stress_text = format_stress_results(state.stress_results)
+    assumptions_text = format_assumptions(state.assumptions)
+    metrics = state.graph_metrics or {}
+    top_hub, fan_in_count = get_top_hub(metrics)
     hubs = state.graph_metrics.get('hubs', [])[:5]
+    archetype = state.archetype or 'unknown'
     
     return f"""{BASE_RULES}
 
-STRESS TEST RESULTS:
+THIS IS YOUR DIFFERENTIATING FEATURE - MAKE IT EXCELLENT!
+
+STRESS TEST RESULTS (from analysis engine):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {stress_text}
 
 ARCHITECTURAL CONTEXT:
-- Core dependency hubs: {', '.join(hubs)}
-- Archetype: {state.archetype}
-- Total modules: {state.graph_metrics.get('total_nodes', 'unknown')}
+• Archetype: {archetype}
+• Core Dependency Hubs: {', '.join(hubs)}
+• Total Modules: {state.graph_metrics.get('total_nodes', 'unknown')}
+• Repository Type: {'LIBRARY' if archetype == 'library' else 'APPLICATION'}
 
-WHAT IS "ARCHITECTURAL FRAGILITY"?
-Architectural fragility refers to structural weaknesses in code organization that make the system 
-vulnerable under stress. Common patterns include:
-- Synchronous bottlenecks (single-threaded operations blocking concurrent requests)
-- Shared mutable state (race conditions under concurrent access)
-- Deep dependency chains (cascade failures when one component fails)
-- Singleton patterns (resource contention at a single point)
-- Missing async boundaries (blocking I/O operations)
-- Over-coupling to core modules (changes ripple through many files)
+ARCHITECTURAL ASSUMPTIONS (relevant to stress analysis):
+{assumptions_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+UNDERSTANDING "ARCHITECTURAL FRAGILITY":
+Architectural fragility = structural weaknesses that make systems vulnerable under stress.
+This includes:
+• Synchronous bottlenecks (blocking operations)
+• Shared mutable state (concurrency issues)
+• Deep dependency chains (cascade failures)
+• Singleton patterns (resource contention)
+• God modules (single points of failure)
+• Missing async boundaries
+
+SPECIAL NOTE FOR LIBRARIES:
+If this is a LIBRARY (not a deployed application), stress tests apply to APPLICATIONS USING THIS LIBRARY:
+• Bundle size stress: How much does this library add to consuming apps?
+• Re-render cascades: Do shared hooks cause performance issues?
+• Composition depth: Does nesting components cause problems?
+• Tree-shaking: Can consumers import only what they need?
 
 TASK:
-Write a comprehensive "Stress Test Analysis" section that explains what breaks under load and why.
+Write a comprehensive "Stress Test Analysis" section with these MANDATORY sections:
 
-Your analysis MUST include these sections:
+### 1. Executive Summary Table
+Create a table showing:
+| Test Scenario | Applicable? | Breaking Point | Primary Bottleneck | Risk Level |
 
-### 1. Breaking Points Summary
-For each stress scenario, state:
-- WHAT breaks (which component/layer)
-- AT WHAT THRESHOLD (specific number: requests/second, concurrent users, data volume)
-- IMMEDIATE SYMPTOM (timeout, crash, data corruption)
+### 2. Detailed Analysis (for each APPLICABLE test)
+For each test that shows is_applicable=true:
 
-### 2. Root Cause Analysis
-For each breaking point, explain WHY it breaks by linking symptoms to architectural decisions:
-- Is it a synchronous operation that should be async?
-- Is it a shared resource without proper isolation/pooling?
-- Is it a deeply nested dependency chain causing cascades?
-- Is it a singleton creating a concurrency bottleneck?
-- Is it missing error handling/circuit breakers?
+**A. What Breaks & When**
+- State the specific breaking point (use exact numbers from results)
+- Describe the failure mode (from the data)
+- Explain immediate symptoms
 
-Link each root cause to SPECIFIC modules or layers using the dependency hub information.
+**B. Root Cause Analysis** 
+- Link failure to SPECIFIC architecture decisions
+- Reference actual modules from the dependency hubs list
+- Use evidence from ARCHITECTURAL ASSUMPTIONS section
+- Explain WHY it breaks (architectural cause, not just symptom)
 
-Example: "The `UserService` module (a dependency hub imported by 23 modules) likely handles 
-authentication synchronously, creating a bottleneck under concurrent load in the API layer."
+Example: "The bottleneck occurs in {top_hub} (a hub with {fan_in_count} dependents) because it uses synchronous operations without connection pooling (detected: no connection pooling in deployment config), creating a cascade when traffic exceeds 5000 requests/second."
 
-### 3. Scaling Implications
-For each breaking point, predict what happens as load increases:
-- What happens if traffic doubles from the breaking point?
-- What happens if concurrent users increase 10x?
-- What happens during traffic spikes (2x-5x normal load for short bursts)?
+**C. Code-Level Evidence**
+- Point to specific layers where bottlenecks exist
+- Reference dependency hubs if they're involved
+- Connect to the architectural data and detected patterns
+- Use specific tech stack info (e.g., "PostgreSQL without connection pooling", "Redux without normalization")
 
-### 4. Architectural Recommendations
-Suggest STRUCTURAL changes (not implementation details) to address fragility:
-- Pattern changes (e.g., "introduce async boundaries between API and database layers")
-- Architectural refactoring (e.g., "consider event-driven architecture for notification system")
-- Isolation strategies (e.g., "implement connection pooling pattern in data access layer")
-- Decoupling suggestions (e.g., "extract caching logic into separate layer to reduce database coupling")
+**D. Scaling Implications**
+Predict what happens as load increases:
+- At 2x current breaking point
+- At 10x traffic
+- During traffic spikes
 
-Base recommendations on the actual architectural structure (layers, hubs, dependencies).
+**E. Architectural Recommendations**
+Suggest STRUCTURAL fixes (not implementation details):
+- Pattern changes ("introduce async boundaries")
+- Architectural refactoring ("implement queue-based processing")
+- Isolation strategies ("add connection pooling layer")
+- Reference detected patterns and suggest improvements
+
+DO NOT suggest code-level fixes like "add async/await" - suggest architecture changes like "introduce message queue pattern"
+
+### 3. Assumption-Related Risks
+Link stress test findings to the ARCHITECTURAL ASSUMPTIONS:
+- Which HIGH/CRITICAL risk assumptions amplify stress test failures?
+- How do detected technology choices (DB, state management, auth) affect resilience?
+
+### 4. Non-Applicable Tests (if any)
+Briefly list which tests don't apply and why, but don't dwell on them.
+
+### 5. Overall Risk Assessment
+Summarize the overall architectural fragility level: LOW, MEDIUM, HIGH, CRITICAL
+Base this on both stress test results AND assumption risk levels.
 
 OUTPUT REQUIREMENTS:
-- Start with ## Stress Test Analysis heading
-- Use ### subheadings for each major section
-- Include a summary table at the top:
-  | Scenario | Breaking Point | Primary Bottleneck | Affected Layer |
-- Write in present tense ("the system breaks at..." not "would break...")
-- Be specific with numbers from the test results
-- Link EVERY bottleneck to actual code structure (layers, modules, dependency hubs)
-- Make recommendations actionable and architecture-focused
+• Start with "## Stress Test Analysis"
+• Use the table format for the summary
+• Write in PRESENT tense ("the system breaks when..." not "would break")
+• Be SPECIFIC with numbers from the test results
+• Link EVERY bottleneck to actual code structure and detected evidence
+• Reference specific technologies detected (PostgreSQL, Redis, etc.)
+• For libraries: explain impact on consuming applications
+• Cross-reference architectural assumptions section
+• Minimum 800 words for applicable tests
+• Do NOT say "more testing needed" - analyze what you have
 
-CRITICAL: This is the DIFFERENTIATING FEATURE of this documentation system.
-Make it detailed, specific, actionable, and directly tied to the codebase architecture.
-This section should provide value that generic load testing tools cannot.
+CRITICAL: This section differentiates your product from competitors. Make it:
+✓ Detailed and technical
+✓ Actionable (clear recommendations)
+✓ Evidence-based (tied to architecture AND assumptions)
+✓ Specific (actual file names, numbers, patterns, technologies)
 
-Use Markdown formatting throughout."""
+NOW WRITE THE STRESS TEST ANALYSIS:"""
 
 
-# ============================================================================
-# VALIDATION
-# ============================================================================
+def get_core_modules_prompt(state: RepoState) -> str:
+    """Generate core modules analysis prompt."""
+    
+    metrics = state.graph_metrics
+    hubs = metrics.get('hubs', [])[:10]
+    
+    # Try to get hub details if available
+    hub_details_text = ""
+    if hubs:
+        hub_details_text = "MODULE CRITICALITY ANALYSIS:\n"
+        for i, hub in enumerate(hubs):
+            # Try to calculate dependents
+            dependents = [k for k, v in state.dependency_graph.items() if hub in v]
+            fan_in = len(dependents)
+            hub_details_text += f"{i+1}. {hub}\n"
+            hub_details_text += f"   • Imported by: {fan_in} modules\n"
+            hub_details_text += f"   • Blast radius: {fan_in / max(metrics.get('total_nodes', 1), 1) * 100:.1f}% of codebase\n"
+    
+    return f"""{BASE_RULES}
+
+DEPENDENCY HUB ANALYSIS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{hub_details_text}
+
+CONTEXT:
+• Total modules: {metrics.get('total_nodes', 'unknown')}
+• Average fan-in: {metrics.get('avg_fan_in', 0):.2f}
+• Total dependencies: {metrics.get('total_edges', 'unknown')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK:
+Write a "Core Modules" section identifying the 5-7 most critical modules:
+
+For EACH core module, provide:
+1. **Module Name & Location**: Full path from the hubs list
+2. **Why It's Critical**: Use fan-in numbers and percentage
+3. **Blast Radius**: How many files affected if it changes (use the numbers above)
+4. **Risk Assessment**: HIGH/MEDIUM/LOW based on coupling
+5. **Responsibilities**: Infer from name and layer
+
+Use this priority framework:
+• Fan-in > 15: CRITICAL (god module risk)
+• Fan-in 8-15: HIGH (important shared component)  
+• Fan-in 3-7: MEDIUM (commonly used utility)
+
+OUTPUT REQUIREMENTS:
+• Start with "## Core Modules"
+• Analyze only the modules in the hubs list above
+• Use actual numbers (don't say "many" - say "23 dependents")
+• Rank by criticality (most critical first)
+• Include a summary paragraph about modularity health
+
+NOW WRITE THE CORE MODULES ANALYSIS:"""
+
+
+def get_system_boundaries_prompt(state: RepoState) -> str:
+    """Generate system boundaries documentation prompt with enhanced evidence."""
+    
+    assumptions_text = format_assumptions(state.assumptions)
+    archetype = state.archetype or 'unknown'
+    
+    # Detect what's present
+    layers = state.layers.keys()
+    has_ui = any('ui' in str(l).lower() or 'component' in str(l).lower() for l in layers)
+    has_api = any('api' in str(l).lower() or 'server' in str(l).lower() for l in layers)
+    has_db = any('db' in str(l).lower() or 'database' in str(l).lower() for l in layers)
+    
+    # Extract tech stack from assumptions
+    tech_details = {}
+    if state.assumptions:
+        for a in state.assumptions:
+            evidence = a.get('evidence', {})
+            if 'database_type' in evidence:
+                tech_details['database'] = evidence['database_type']
+            if 'orm_type' in evidence:
+                tech_details['orm'] = evidence['orm_type']
+            if 'state_manager' in evidence:
+                tech_details['state'] = evidence['state_manager']
+            if 'auth_type' in evidence:
+                tech_details['auth'] = evidence['auth_type']
+            if 'platform' in evidence:
+                tech_details['deployment'] = evidence['platform']
+    
+    tech_summary = "\n".join([f"• {k.title()}: {v}" for k, v in tech_details.items()])
+    
+    return f"""{BASE_RULES}
+
+SYSTEM CLASSIFICATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Archetype: {archetype.upper()}
+
+DETECTED PRESENCE:
+• Frontend/UI layer: {'YES' if has_ui else 'NO'}
+• API/Backend layer: {'YES' if has_api else 'NO'}  
+• Database layer: {'YES' if has_db else 'NO'}
+
+DETECTED TECHNOLOGIES:
+{tech_summary if tech_summary else '• No specific technologies detected'}
+
+ARCHITECTURAL ASSUMPTIONS (from analysis):
+{assumptions_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK:
+Write a "System Boundaries" section that clearly defines what IS and ISN'T in this repository:
+
+### What IS Included (THIS Repository)
+List EXACTLY what's in this repo based on detected layers and technologies:
+- Reference specific tech stack (e.g., "✅ React UI components with Redux state management")
+- Use detected technology names from DETECTED TECHNOLOGIES above
+
+### What IS NOT Included (External Dependencies)
+Based on the archetype and assumptions, state what's EXTERNAL:
+- If no backend detected: "❌ No backend - business logic external"
+- If no database: "❌ No database - data persistence external"
+- Be specific about what's missing using the assumptions evidence
+
+### Integration Requirements
+What must external systems provide for this to work?
+- Use evidence from assumptions (e.g., "Requires external PostgreSQL database")
+- Reference specific auth requirements if detected
+
+### Key Assumptions About Boundaries
+Use the assumptions data above to explain:
+- What responsibilities are delegated externally
+- What this system expects to exist outside itself
+- Include risk levels from assumptions
+
+OUTPUT REQUIREMENTS:
+• Start with "## System Boundaries"
+• Use ✅ and ❌ for clarity
+• Be definitive based on the detected layers and technologies
+• Reference specific technologies by name (PostgreSQL, Redis, JWT, etc.)
+• Reference the assumptions data with their evidence
+• Do NOT speculate - use only detected information
+
+EXAMPLE:
+"### What IS Included
+✅ React frontend with 45 UI components implementing Atomic Design (Confidence: 80%)
+✅ Redux state management with 12 store files
+✅ JWT authentication layer (detected in 8 auth files)
+✅ Jest testing framework with 32.5% coverage
+
+### What IS NOT Included  
+❌ Backend API - assumes external REST API (HIGH RISK - see assumptions)
+❌ PostgreSQL database - data layer external (detected PostgreSQL usage without local DB)
+..."
+
+NOW WRITE THE SYSTEM BOUNDARIES:"""
+
+
+def get_assumptions_prompt(state: RepoState) -> str:
+    """Generate assumptions documentation prompt with full evidence detail."""
+    
+    assumptions_text = format_assumptions(state.assumptions)
+    
+    return f"""{BASE_RULES}
+
+DETECTED ARCHITECTURAL ASSUMPTIONS (from code analysis):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{assumptions_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IMPORTANT: These are DETECTED assumptions, not guesses!
+The evidence field shows exactly what was found in the codebase.
+
+TASK:
+Write an "Architectural Assumptions" section analyzing these assumptions:
+
+For EACH assumption (grouped by risk level):
+1. **The Assumption**: State it clearly
+2. **Evidence**: Why we know this (use the detailed evidence field)
+   - Include specific file counts, technology names, configuration presence
+   - Example: "Evidence: 12 Redux store files detected, state_manager: Redux"
+3. **Impact**: What happens because of this assumption (from impact field)
+4. **When It Breaks**: Specific conditions that invalidate it
+5. **Mitigation**: How to reduce the risk (use the mitigation strategies provided)
+   - List all mitigation strategies from the data
+
+Focus on CRITICAL and HIGH risk first, but cover all levels.
+
+OUTPUT REQUIREMENTS:
+• Start with "## Architectural Assumptions"
+• Group by risk level (### Critical Risk, ### High Risk, ### Medium Risk, ### Low Risk)
+• Address each assumption in the data above with its full evidence
+• Use specific numbers and technology names from evidence (e.g., "12 store files", "PostgreSQL", "Jest")
+• Be specific about breaking conditions (numbers, thresholds)
+• Include ALL mitigation strategies provided
+• Do NOT invent new assumptions - analyze only what's provided
+• Reference confidence scores
+
+EXAMPLE GOOD SECTION:
+"### High Risk
+
+**No Centralized State Management Detected**
+• Confidence: 75%
+• Evidence: 45 UI components detected with no Redux, Zustand, MobX, Recoil, or Context Provider patterns found
+• Impact: State likely managed via props drilling or local component state, leading to maintenance issues
+• When It Breaks: When component tree depth exceeds 5 levels or when state needs to be shared across 10+ components
+• Mitigation:
+  → Consider adopting Redux, Zustand, or Context API
+  → Audit prop drilling depth
+  → Implement state management for complex flows"
+
+NOW WRITE THE ASSUMPTIONS ANALYSIS:"""
+
 
 def validate_state_for_docs(state: RepoState) -> Dict[str, List[str]]:
     """
-    Validate that state has necessary data for each documentation section.
-    Returns a dict of {section_name: [warnings]}.
+    Validate that state has necessary data for documentation.
+    Returns dict of {section_name: [warnings]}.
+    Enhanced to check for evidence quality.
     """
     warnings = {}
     
     # Overview validation
     overview_warnings = []
     if not state.archetype:
-        overview_warnings.append("No archetype detected - overview will be generic")
+        overview_warnings.append("No archetype detected - classification may be generic")
     if not state.architecture_hypotheses:
-        overview_warnings.append("No architecture hypotheses - overview will lack depth")
+        overview_warnings.append("No architecture patterns detected")
+    else:
+        # Check if hypotheses have evidence
+        hypotheses_without_evidence = [h for h in state.architecture_hypotheses if not h.get('evidence')]
+        if hypotheses_without_evidence:
+            overview_warnings.append(f"{len(hypotheses_without_evidence)} patterns detected without evidence")
     if overview_warnings:
         warnings['overview'] = overview_warnings
     
     # Architecture validation
     arch_warnings = []
     if not state.layers:
-        arch_warnings.append("No layers detected - architecture section will be minimal")
+        arch_warnings.append("No layers detected - architecture analysis will be minimal")
     if not state.graph_metrics:
-        arch_warnings.append("No graph metrics - cannot analyze dependencies")
+        arch_warnings.append("No graph metrics available")
     if arch_warnings:
         warnings['architecture'] = arch_warnings
     
-    # Core modules validation
-    core_warnings = []
-    if not state.graph_metrics.get('hubs'):
-        core_warnings.append("No dependency hubs found - core modules section will be empty")
-    if core_warnings:
-        warnings['core_modules'] = core_warnings
-    
-    # System boundaries validation
-    boundaries_warnings = []
+    # Assumptions validation
+    assumption_warnings = []
     if not state.assumptions:
-        boundaries_warnings.append("No assumptions detected - boundaries analysis will be limited")
-    if boundaries_warnings:
-        warnings['system_boundaries'] = boundaries_warnings
+        assumption_warnings.append("No assumptions detected - boundary analysis will be limited")
+    else:
+        # Check for evidence quality
+        assumptions_without_evidence = [a for a in state.assumptions if not a.get('evidence')]
+        if assumptions_without_evidence:
+            assumption_warnings.append(f"{len(assumptions_without_evidence)} assumptions without evidence")
+        
+        # Check for mitigation strategies
+        assumptions_without_mitigation = [a for a in state.assumptions if not a.get('mitigation')]
+        if assumptions_without_mitigation:
+            assumption_warnings.append(f"{len(assumptions_without_mitigation)} assumptions without mitigation strategies")
+    
+    if assumption_warnings:
+        warnings['assumptions'] = assumption_warnings
     
     # Stress test validation
     stress_warnings = []
     if not state.stress_results:
-        stress_warnings.append("CRITICAL: No stress test results - this is your differentiating feature!")
-    if not state.graph_metrics.get('hubs'):
-        stress_warnings.append("No dependency hubs - cannot link stress results to architecture")
+        stress_warnings.append("CRITICAL: No stress test results!")
+    elif all(not r.get('is_applicable', False) for r in state.stress_results):
+        stress_warnings.append("WARNING: All stress tests marked non-applicable")
     if stress_warnings:
-        warnings['stress_test'] = stress_warnings
+        warnings['stress_analysis'] = stress_warnings
     
     return warnings
