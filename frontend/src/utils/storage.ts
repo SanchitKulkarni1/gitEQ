@@ -15,10 +15,24 @@ export function clearApiKey(): void {
 
 export function saveTheme(theme: 'dark' | 'light'): void {
   localStorage.setItem(THEME_STORAGE_KEY, theme);
-  document.documentElement.classList.toggle('dark', theme === 'dark');
+  applyTheme(theme);
 }
 
 export function getTheme(): 'dark' | 'light' {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
   return (stored as 'dark' | 'light') || 'dark';
+}
+
+export function applyTheme(theme: 'dark' | 'light'): void {
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+}
+
+// Initialize theme on page load
+export function initTheme(): void {
+  const theme = getTheme();
+  applyTheme(theme);
 }

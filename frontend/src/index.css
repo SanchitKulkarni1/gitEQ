@@ -1,3 +1,138 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Base styles */
+:root {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --border-color: #334155;
+}
+
+/* Light mode variables */
+:root:not(.dark) {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: #e2e8f0;
+}
+
+/* Apply theme to body */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light mode overrides for common elements */
+:root:not(.dark) .bg-slate-900 {
+  background-color: #f1f5f9 !important;
+}
+
+:root:not(.dark) .bg-slate-800 {
+  background-color: #ffffff !important;
+}
+
+:root:not(.dark) .bg-slate-800\/80 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+:root:not(.dark) .bg-slate-800\/40 {
+  background-color: rgba(241, 245, 249, 0.8) !important;
+}
+
+:root:not(.dark) .text-white {
+  color: #0f172a !important;
+}
+
+:root:not(.dark) .text-slate-200 {
+  color: #334155 !important;
+}
+
+:root:not(.dark) .text-slate-300 {
+  color: #475569 !important;
+}
+
+:root:not(.dark) .text-slate-400 {
+  color: #64748b !important;
+}
+
+:root:not(.dark) .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+:root:not(.dark) .border-slate-700 {
+  border-color: #e2e8f0 !important;
+}
+
+:root:not(.dark) .border-slate-700\/50 {
+  border-color: rgba(226, 232, 240, 0.8) !important;
+}
+
+:root:not(.dark) .border-slate-600 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Header light mode */
+:root:not(.dark) .bg-slate-900\/95 {
+  background-color: rgba(248, 250, 252, 0.95) !important;
+}
+
+/* Sidebar light mode */
+:root:not(.dark) .bg-slate-900\/50 {
+  background-color: rgba(241, 245, 249, 0.9) !important;
+}
+
+/* Input fields in light mode */
+:root:not(.dark) input.bg-slate-800 {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+:root:not(.dark) input::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Code blocks in light mode */
+:root:not(.dark) pre.bg-slate-800,
+:root:not(.dark) pre.bg-slate-900 {
+  background-color: #1e293b !important;
+}
+
+:root:not(.dark) code.bg-slate-800,
+:root:not(.dark) code.bg-slate-800\/80 {
+  background-color: #e2e8f0 !important;
+  color: #7c3aed !important;
+}
+
+/* Purple elements stay purple */
+:root:not(.dark) .text-purple-400 {
+  color: #a855f7 !important;
+}
+
+:root:not(.dark) .text-purple-300 {
+  color: #c084fc !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}

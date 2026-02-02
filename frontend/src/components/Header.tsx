@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Code2, Eye, EyeOff, Check, Sun, Moon, HelpCircle } from 'lucide-react';
-import { saveApiKey, getApiKey, saveTheme, getTheme } from '../utils/storage';
+import { Code2, Eye, EyeOff, Check, HelpCircle } from 'lucide-react';
+import { saveApiKey, getApiKey } from '../utils/storage';
 
 interface HeaderProps {
   onApiKeyChange: (key: string) => void;
@@ -11,7 +11,6 @@ export default function Header({ onApiKeyChange }: HeaderProps) {
   const [showKey, setShowKey] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   useEffect(() => {
     const storedKey = getApiKey();
@@ -20,7 +19,6 @@ export default function Header({ onApiKeyChange }: HeaderProps) {
       setIsSaved(true);
       onApiKeyChange(storedKey);
     }
-    setTheme(getTheme());
   }, [onApiKeyChange]);
 
   const handleApiKeyChange = (value: string) => {
@@ -31,12 +29,6 @@ export default function Header({ onApiKeyChange }: HeaderProps) {
       setIsSaved(true);
       onApiKeyChange(value);
     }
-  };
-
-  const toggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(newTheme);
-    saveTheme(newTheme);
   };
 
   return (
@@ -101,14 +93,6 @@ export default function Header({ onApiKeyChange }: HeaderProps) {
               )}
             </div>
           </div>
-
-          <button
-            onClick={toggleTheme}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 md:w-5 md:h-5" /> : <Moon className="w-4 h-4 md:w-5 md:h-5" />}
-          </button>
         </div>
       </div>
     </header>
