@@ -5,7 +5,6 @@
 
 **gitEQ** is an AI-powered tool that automatically analyzes GitHub repositories and generates comprehensive technical documentation. Simply paste a repo URL, and gitEQ will analyze the codebase structure, architecture, and generate professional documentation with an AI chatbot for interactive Q&A.
 
-![gitEQ Demo](https://giteq.vercel.app/)
 
 ## ✨ Features
 
