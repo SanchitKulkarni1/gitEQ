@@ -1,10 +1,10 @@
 # app/docs/docs_generator.py
 import concurrent.futures
+import os
 from typing import Dict, Any
 from app.models.state import RepoState
-from app.llm.gemini_client import client
+from app.llm.gemini_client import get_client
 
-# USE GEMMA (As per your working config)
 MODEL_NAME = "gemini-2.5-flash-lite" 
 
 def fetch_section(args):
@@ -14,6 +14,10 @@ def fetch_section(args):
     section, state_dict = args
     # Reconstruct state from dict for the worker
     state = RepoState(**state_dict) 
+    
+    # Get client with API key from environment (set by main.py before calling)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = get_client(api_key)
     
     context = ""
     

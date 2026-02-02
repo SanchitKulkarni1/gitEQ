@@ -1,6 +1,7 @@
 # app/chat/intent_classifier.py
 import json
-from app.llm.gemini_client import client
+import os
+from app.llm.gemini_client import get_client
 from google.genai import types
 
 GEN_CONFIG = types.GenerateContentConfig(
@@ -10,53 +11,6 @@ GEN_CONFIG = types.GenerateContentConfig(
 
 # Use your High-Limit Model
 MODEL_NAME = "gemini-2.5-flash-lite"
-
-def comprehend_query(question: str):
-    """
-    Performs Intent Classification AND Entity Extraction in a single shot.
-    Returns: (intent_string, entities_dict)
-    """
-    prompt = f"""
-    Analyze the user question about a GitHub repository.
-    
-    1. CLASSIFY INTENT into ONE category:
-       [structure, change_impact, architecture, stress, code_lookup, unknown]
-    
-    2. EXTRACT ENTITIES:
-       - 'files': list of file paths (e.g. 'main.py', 'auth/login.ts')
-       - 'layers': list of architectural layers (e.g. 'ui', 'database', 'api')
-
-    Question: "{question}"
-    
-    Return JSON format:
-    {{
-        "intent": "category_name",
-        "entities": {{
-            "files": [],
-            "layers": []
-        }}
-    }}
-    """
-    
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME, 
-            contents=prompt, 
-            config=GEN_CONFIG
-        )
-        
-        # Parse the JSON response
-        data = json.loads(response.text.strip())
-        
-        # safely extract (defaults provided in case LLM hallucinates structure)
-        intent = data.get("intent", "unknown").lower()
-        entities = data.get("entities", {"files": [], "layers": []})
-        
-        return intent, entities
-
-    except Exception as e:
-        print(f"DEBUG: Comprehension failed: {e}")
-        return "unknown", {"files": [], "layers": []}
 
 def comprehend_query(question: str):
     """
@@ -83,6 +37,10 @@ def comprehend_query(question: str):
     """
     
     try:
+        # Get client with user's API key from environment
+        api_key = os.environ.get("GEMINI_API_KEY")
+        client = get_client(api_key)
+        
         response = client.models.generate_content(
             model=MODEL_NAME, 
             contents=prompt, 

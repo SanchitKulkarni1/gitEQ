@@ -8,6 +8,7 @@ Improved chatbot engine with:
 """
 
 import re
+import os
 from typing import Tuple, Dict, List, Optional
 from app.models.state import RepoState
 from app.llm.chat.retrieval import (
@@ -16,7 +17,7 @@ from app.llm.chat.retrieval import (
     get_stress_context,
     get_code_context,
 )
-from app.llm.gemini_client import client
+from app.llm.gemini_client import get_client
 from app.stress.stress_engine import run_stress_test
 from app.stress.stress_models import StressVector, ArchitectureType
 
@@ -395,6 +396,8 @@ def answer_question(state: RepoState, question: str) -> str:
         return "I don't have enough context to answer that question. Could you be more specific?"
     
     try:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        client = get_client(api_key)
         response = client.models.generate_content(
             model=CHAT_MODEL,
             contents=prompt
