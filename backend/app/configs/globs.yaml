@@ -1,13 +1,98 @@
 include:
-  - "src/**/*.py"
-  - "src/**/*.ts"
-  - "src/**/*.tsx"
-  - "app/**/*.ts"
-  - "app/**/*.tsx"
+  # ---------------------------
+  # Core source languages
+  # ---------------------------
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.java"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.rb"
+  - "**/*.php"
+
+  # ---------------------------
+  # Config & dependency files
+  # ---------------------------
+  - "package.json"
+  - "package-lock.json"
+  - "yarn.lock"
+  - "pnpm-lock.yaml"
+
+  - "pyproject.toml"
+  - "poetry.lock"
+  - "requirements.txt"
+  - "Pipfile"
+  - "Pipfile.lock"
+
+  - "go.mod"
+  - "go.sum"
+  - "Cargo.toml"
+  - "Cargo.lock"
+  - "Gemfile"
+  - "Gemfile.lock"
+
+  # ---------------------------
+  # Entry points & scripts
+  # ---------------------------
+  - "**/main.*"
+  - "**/app.*"
+  - "**/server.*"
+  - "**/index.*"
+  - "**/cli.*"
+
+  # ---------------------------
+  # Infra / deployment
+  # ---------------------------
+  - "Dockerfile"
+  - "**/docker-compose*.yml"
+  - "**/docker-compose*.yaml"
+  - "**/*.tf"
+  - "**/*.tfvars"
+  - "**/*.yml"
+  - "**/*.yaml"
+
+  # ---------------------------
+  # Docs (low priority but useful)
+  # ---------------------------
   - "**/*.md"
 
 exclude:
+  # ---------------------------
+  # Dependency junk
+  # ---------------------------
   - "**/node_modules/**"
+  - "**/vendor/**"
+  - "**/.venv/**"
+  - "**/venv/**"
+  - "**/__pycache__/**"
+  - "**/.mypy_cache/**"
+  - "**/.pytest_cache/**"
+
+  # ---------------------------
+  # Build artifacts
+  # ---------------------------
   - "**/dist/**"
   - "**/build/**"
+  - "**/.next/**"
+  - "**/.nuxt/**"
+  - "**/out/**"
+  - "**/coverage/**"
+  - "**/target/**"
+
+  # ---------------------------
+  # Generated / binary
+  # ---------------------------
   - "**/*.min.js"
+  - "**/*.map"
+  - "**/*.lock.tmp"
+
+  # ---------------------------
+  # VCS & IDE noise
+  # ---------------------------
+  - "**/.git/**"
+  - "**/.github/**"
+  - "**/.idea/**"
+  - "**/.vscode/**"

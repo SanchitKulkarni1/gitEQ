@@ -18,7 +18,7 @@ async def main():
     
     # Run the LangGraph ingestion pipeline
     raw_state = await graph.ainvoke({
-        "repo_url": "https://github.com/SanchitKulkarni1/portfoliowebsite.git"
+        "repo_url": "hhttps://github.com/SanchitKulkarni1/AI-Sales-Agent.git"
     })
     
     # Convert dictionary back to Pydantic object
@@ -80,13 +80,13 @@ async def main():
     # =========================================================================
     print("\n🤖 STARTING PIPELINE: CHATBOT STRESS TEST")
     
-    user_question_1 = "What will happen if we get a sudden spike of 5000 concurrent users on the landing page?"
+    user_question_1 = "What happens if the LLM provider rate-limits us suddenly?"
     print(f"\n❓ User Question: '{user_question_1}'")
     
     response_1 = answer_question(state, user_question_1)
     print(f"💡 Chatbot Answer:\n{response_1}")
 
-    user_question_2 = "Can you analyze the change impact if we modify the routing logic?"
+    user_question_2 = "How many node edges are present?"
     print(f"\n❓ User Question: '{user_question_2}'")
     
     response_2 = answer_question(state, user_question_2)
