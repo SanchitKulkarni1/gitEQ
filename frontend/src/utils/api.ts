@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Auto-detect environment: use production backend on Vercel, localhost for development
+const API_BASE_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:8000'
+  : 'https://giteq.onrender.com';
 
 export interface AnalyzeRequest {
   repo_url: string;
