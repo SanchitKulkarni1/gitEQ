@@ -8,10 +8,6 @@ import ErrorView from './components/ErrorView';
 import ChatBot from './components/ChatBot';
 import { AppState, Documentation, AnalysisStatus } from './types';
 import { startAnalysis, getAnalysisStatus } from './utils/api';
-import { initTheme } from './utils/storage';
-
-// Initialize theme on app load
-initTheme();
 
 const ANALYSIS_STEPS: AnalysisStatus[] = [
   { step: 1, message: 'Fetching repository structure...', completed: false },
