@@ -5,7 +5,7 @@ from app.models.state import RepoState
 from app.llm.gemini_client import client
 
 # USE GEMMA (As per your working config)
-MODEL_NAME = "gemma-3-12b-it" 
+MODEL_NAME = "gemini-2.5-flash-lite" 
 
 def fetch_section(args):
     """
